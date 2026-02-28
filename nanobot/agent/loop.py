@@ -275,6 +275,8 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_start: Callable[[], Awaitable[None]] | Callable[[], None] | None = None,
+        on_thinking_end: Callable[[], Awaitable[None]] | Callable[[], None] | None = None,
     ) -> OutboundMessage | None:
         """
         Process a single inbound message.
@@ -333,12 +335,33 @@ class AgentLoop:
         async def _bus_progress(content: str) -> None:
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content,
-                metadata=msg.metadata or {},
+                metadata={(msg.metadata or {}) | {"message_type": "progress"}},
             ))
 
+        # Extract callbacks from metadata if available (for WebSocket/real-time channels)
+        metadata_callbacks = msg.metadata or {}
+        _on_thinking_start = on_thinking_start or metadata_callbacks.get("on_thinking_start")
+        _on_thinking_end = on_thinking_end or metadata_callbacks.get("on_thinking_end")
+        _on_progress = on_progress or metadata_callbacks.get("on_progress") or _bus_progress
+
+        # Call thinking start callback
+        if _on_thinking_start:
+            logger.info(f"[Thinking] Calling thinking_start callback for {msg.channel}:{msg.chat_id}")
+            if asyncio.iscoroutinefunction(_on_thinking_start):
+                await _on_thinking_start()
+            elif callable(_on_thinking_start):
+                _on_thinking_start()
+
         final_content, tools_used = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=_on_progress,
         )
+
+        # Call thinking end callback
+        if _on_thinking_end:
+            if asyncio.iscoroutinefunction(_on_thinking_end):
+                await _on_thinking_end()
+            elif callable(_on_thinking_end):
+                _on_thinking_end()
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."

@@ -72,7 +72,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     logger.info("Starting nanobot web API...")
+
+    # Initialize database if enabled
+    from nanobot.config.loader import load_config
+    try:
+        config = load_config()
+        if config.database.enabled:
+            await init_database(
+                host=config.database.host,
+                port=config.database.port,
+                user=config.database.user,
+                password=config.database.password,
+                db=config.database.database,
+                pool_size=config.database.pool_size
+            )
+            logger.info("✓ Database initialized")
+    except Exception as e:
+        logger.warning(f"Could not initialize database: {e}")
+
     yield
+
     # Shutdown
     logger.info("Shutting down nanobot web API...")
     await close_database()

@@ -19,9 +19,6 @@ from nanobot.web.app import create_app, manager, send_to_websocket
 from nanobot.web.repositories.conversation_repo import ConversationRepository
 from nanobot.web.repositories.message_repo import MessageRepository
 
-if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
-
 
 class WebChannel(BaseChannel):
     """
@@ -36,11 +33,9 @@ class WebChannel(BaseChannel):
         self,
         config: WebConfig,
         bus: MessageBus,
-        session_manager: SessionManager | None = None,
     ):
         super().__init__(config, bus)
         self.config: WebConfig = config
-        self.session_manager = session_manager
         self._server_task: asyncio.Task | None = None
         self._uvicorn_server = None
         self._dispatch_task: asyncio.Task | None = None
@@ -69,7 +64,7 @@ class WebChannel(BaseChannel):
 
         # Configure uvicorn
         config = uvicorn.Config(
-            app=app,
+            app=self.app,
             host=self.config.host,
             port=self.config.port,
             log_level="info",
@@ -139,10 +134,13 @@ class WebChannel(BaseChannel):
             logger.warning(f"No active WebSocket connection for session {session_id}")
             return
 
+        # Determine message type from metadata
+        msg_type = msg.metadata.get("message_type", "message") if msg.metadata else "message"
+
         # Send message to WebSocket client
         await send_to_websocket(
             session_id=session_id,
-            message_type="message",
+            message_type=msg_type,
             data={
                 "conversation_id": msg.chat_id,
                 "content": msg.content,
@@ -151,18 +149,55 @@ class WebChannel(BaseChannel):
             }
         )
 
-        # Save message to database if enabled
-        if self.config.persist_to_db:
+        # Only save final messages to database (not progress/thinking messages)
+        if msg_type == "message" and self.config.persist_to_db:
             try:
                 msg_repo = MessageRepository()
+                # Clean metadata before saving (remove callback functions)
+                clean_metadata = {}
+                if msg.metadata:
+                    for key, value in msg.metadata.items():
+                        # Only include serializable values (not functions)
+                        if not callable(value):
+                            clean_metadata[key] = value
+
                 await msg_repo.add(
                     conversation_id=msg.chat_id,
                     role="assistant",
                     content=msg.content,
-                    metadata=msg.metadata
+                    metadata=clean_metadata
                 )
             except Exception as e:
                 logger.error(f"Failed to save message to database: {e}")
+
+    async def send_thinking_start(self, session_id: str) -> None:
+        """Send a signal to start the thinking state."""
+        if session_id in self._connections:
+            logger.info(f"[Thinking] Sending thinking_start to {session_id}")
+            await send_to_websocket(
+                session_id=session_id,
+                message_type="thinking_start",
+                data={"status": "thinking"}
+            )
+
+    async def send_thinking_end(self, session_id: str) -> None:
+        """Send a signal to end the thinking state."""
+        if session_id in self._connections:
+            await send_to_websocket(
+                session_id=session_id,
+                message_type="thinking_end",
+                data={"status": "done"}
+            )
+
+    async def send_progress(self, session_id: str, content: str) -> None:
+        """Send a progress message during processing."""
+        if session_id in self._connections:
+            logger.info(f"[Thinking] Sending progress to {session_id}: {content[:50]}")
+            await send_to_websocket(
+                session_id=session_id,
+                message_type="progress",
+                data={"content": content}
+            )
 
     async def handle_websocket(self, websocket: WebSocket, session_id: str, user_id: str = "anonymous") -> None:
         """
@@ -194,10 +229,26 @@ class WebChannel(BaseChannel):
         conversation_id = session_id
         conv_repo = ConversationRepository()
 
-        # Check if conversation exists, if not create it
+        # Check if conversation exists, if not create it with the session_id
         conv_exists = await conv_repo.exists(conversation_id)
         if not conv_exists:
-            await conv_repo.create(user_id=user_id, title="新对话", channel="web")
+            try:
+                await conv_repo.create(
+                    user_id=user_id,
+                    title="新对话",
+                    channel="web",
+                    conv_id=conversation_id  # Use the session_id as conversation_id
+                )
+            except Exception as e:
+                # Handle duplicate key error - conversation might have been created by another connection
+                error_code = getattr(e, 'args', [None])[0] if e.args else None
+                if error_code == 1062:  # Duplicate entry
+                    logger.debug(f"Conversation {conversation_id} already exists, created by another connection")
+                    # Verify it now exists
+                    if not await conv_repo.exists(conversation_id):
+                        raise  # If it still doesn't exist, this is a real error
+                else:
+                    raise  # Re-raise other errors
 
         # Store connection info
         self._connections[session_id] = {
@@ -249,14 +300,28 @@ class WebChannel(BaseChannel):
                         except Exception as e:
                             logger.error(f"Failed to save message to database: {e}")
 
+                    # Create async callbacks for real-time progress
+                    async def on_thinking_start():
+                        await self.send_thinking_start(session_id)
+
+                    async def on_thinking_end():
+                        await self.send_thinking_end(session_id)
+
+                    async def on_progress(content: str):
+                        await self.send_progress(session_id, content)
+
                     # Forward to message bus for agent processing
+                    # Pass WebSocket-specific callbacks for real-time progress
                     await self._handle_message(
                         sender_id=user_id,
                         chat_id=conversation_id,
                         content=content,
                         metadata={
                             "session_id": session_id,
-                            "channel": "web"
+                            "channel": "web",
+                            "on_thinking_start": on_thinking_start,
+                            "on_thinking_end": on_thinking_end,
+                            "on_progress": on_progress
                         }
                     )
 

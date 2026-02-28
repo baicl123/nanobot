@@ -9,9 +9,18 @@ from nanobot.web.database import get_database
 class ConversationRepository:
     """Repository for conversation data access."""
 
-    async def create(self, user_id: str, title: str = "新对话", channel: str = "web") -> dict:
-        """Create a new conversation."""
-        conv_id = str(uuid.uuid4())
+    async def create(self, user_id: str, title: str = "新对话", channel: str = "web", conv_id: str | None = None) -> dict:
+        """Create a new conversation.
+
+        Args:
+            user_id: User identifier
+            title: Conversation title
+            channel: Channel name (web, telegram, etc.)
+            conv_id: Optional conversation ID (if not provided, generates UUID)
+        """
+        if conv_id is None:
+            conv_id = str(uuid.uuid4())
+
         db = get_database()
         if db is None:
             raise RuntimeError("Database not initialized")

@@ -74,7 +74,7 @@ async def init_tables():
                     metadata JSON COMMENT '元数据',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                     INDEX idx_conversation_created (conversation_id, created_at),
-                    FULLTEXT INDEX ft_content (content) WITH (parser='ngram'),
+                    FULLTEXT INDEX ft_content (content),
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 ) COMMENT='消息表'
             """)
