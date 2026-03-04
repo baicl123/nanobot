@@ -125,12 +125,26 @@ class WebChannel(BaseChannel):
         """
         Send a message through the web channel.
 
-        The chat_id serves as the session_id for WebSocket connections.
+        The chat_id is the conversation_id. We need to find the actual WebSocket session_id.
         """
-        session_id = msg.chat_id
+        conversation_id = msg.chat_id
 
-        # Check if session is connected
-        if session_id not in self._connections:
+        # Find the actual session_id from self._connections
+        # The manager.active_connections key is format: user_id:conversation_id
+        # We need to find which connection has this conversation_id
+        session_id = None
+        for sess_id, conn_info in self._connections.items():
+            if conn_info.get("conversation_id") == conversation_id:
+                session_id = sess_id
+                break
+
+        if not session_id:
+            logger.warning(f"No active connection found for conversation {conversation_id}")
+            return
+
+        # Check if session is connected in manager
+        from nanobot.web.app import manager
+        if session_id not in manager.active_connections:
             logger.warning(f"No active WebSocket connection for session {session_id}")
             return
 
@@ -142,7 +156,7 @@ class WebChannel(BaseChannel):
             session_id=session_id,
             message_type=msg_type,
             data={
-                "conversation_id": msg.chat_id,
+                "conversation_id": conversation_id,
                 "content": msg.content,
                 "role": "assistant",
                 "timestamp": msg.metadata.get("timestamp") if msg.metadata else None
@@ -172,38 +186,94 @@ class WebChannel(BaseChannel):
 
     async def send_thinking_start(self, session_id: str) -> None:
         """Send a signal to start the thinking state."""
-        if session_id in self._connections:
-            logger.info(f"[Thinking] Sending thinking_start to {session_id}")
+        # Find the actual session_id (which is user_id:conversation_id)
+        actual_session_id = self._find_session_id(session_id)
+        if not actual_session_id:
+            return
+
+        from nanobot.web.app import manager
+        if actual_session_id in manager.active_connections:
+            logger.info(f"[Thinking] Sending thinking_start to {actual_session_id}")
             await send_to_websocket(
-                session_id=session_id,
+                session_id=actual_session_id,
                 message_type="thinking_start",
                 data={"status": "thinking"}
             )
 
     async def send_thinking_end(self, session_id: str) -> None:
         """Send a signal to end the thinking state."""
-        if session_id in self._connections:
+        # Find the actual session_id (which is user_id:conversation_id)
+        actual_session_id = self._find_session_id(session_id)
+        if not actual_session_id:
+            return
+
+        from nanobot.web.app import manager
+        if actual_session_id in manager.active_connections:
             await send_to_websocket(
-                session_id=session_id,
+                session_id=actual_session_id,
                 message_type="thinking_end",
                 data={"status": "done"}
             )
 
-    async def send_progress(self, session_id: str, content: str) -> None:
+    async def send_progress(self, session_id: str, content: str, tool_hint: bool = False) -> None:
         """Send a progress message during processing."""
-        if session_id in self._connections:
-            logger.info(f"[Thinking] Sending progress to {session_id}: {content[:50]}")
+        # Find the actual session_id (which is user_id:conversation_id)
+        actual_session_id = self._find_session_id(session_id)
+        if not actual_session_id:
+            return
+
+        from nanobot.web.app import manager
+        if actual_session_id in manager.active_connections:
+            logger.info(f"[Thinking] Sending progress to {actual_session_id}: {content[:50]}")
             await send_to_websocket(
-                session_id=session_id,
+                session_id=actual_session_id,
                 message_type="progress",
-                data={"content": content}
+                data={"content": content, "tool_hint": tool_hint}
             )
+
+    def _find_session_id(self, session_or_conversation_id: str) -> str | None:
+        """
+        Find the actual session_id (user_id:conversation_id) from conversation_id or session_id.
+
+        Args:
+            session_or_conversation_id: Can be either:
+                - conversation_id (e.g., "1772413766214")
+                - session_id (e.g., "60079031:1772413766214")
+
+        Returns:
+            The actual session_id (key in self._connections), or None if not found
+        """
+        # If it's already a session_id (contains ':'), check directly
+        if ':' in session_or_conversation_id:
+            # It's a session_id, check if it exists in connections
+            if session_or_conversation_id in self._connections:
+                return session_or_conversation_id
+
+            # Extract conversation_id and try to match
+            parts = session_or_conversation_id.split(':', 1)
+            conversation_id = parts[1]
+        else:
+            # It's a conversation_id
+            conversation_id = session_or_conversation_id
+
+        # Search by conversation_id
+        for sess_id, conn_info in self._connections.items():
+            if conn_info.get("conversation_id") == conversation_id:
+                return sess_id
+
+        logger.warning(f"No connection found for {session_or_conversation_id}")
+        return None
 
     async def handle_websocket(self, websocket: WebSocket, session_id: str, user_id: str = "anonymous") -> None:
         """
-        Handle a WebSocket connection.
+        Handle a WebSocket connection with two-tier memory support.
 
-        This method should be called from the FastAPI WebSocket endpoint.
+        Session Key format: web:{user_id}:{session_id}
+        - user_id: For UserMemory (cross-session long-term memory)
+        - session_id: For SessionMemory (single-session short-term memory)
+        - Single active session: Close old connection when new one connects for same user
+
+        Note: The WebSocket connection is already accepted by FastAPI before this method is called.
         """
         # Check auth token if configured
         if self.config.auth_token:
@@ -211,8 +281,9 @@ class WebChannel(BaseChannel):
             # For now, we'll accept all connections
             pass
 
-        # Check connection limit
-        if len(self._connections) >= self.config.max_connections:
+        # Check connection limit using manager's active connections
+        from nanobot.web.app import manager
+        if len(manager.active_connections) >= self.config.max_connections:
             await websocket.close(code=1008, reason="Max connections reached")
             return
 
@@ -222,14 +293,41 @@ class WebChannel(BaseChannel):
             logger.warning(f"Access denied for user {user_id}")
             return
 
-        # Accept connection via manager
-        await manager.connect(session_id, websocket)
+        # Parse session_id: might be in format "user123:conv-001" or just "conv-001"
+        parts = session_id.split(':', 1)
+        if len(parts) == 2:
+            conversation_id = parts[1]
+            # Validate user_id matches
+            if user_id != parts[0]:
+                logger.warning(f"User ID mismatch: {user_id} != {parts[0]}")
+                await websocket.close(code=1008, reason="Invalid user ID")
+                return
+        else:
+            # Fallback: use session_id as conversation_id
+            conversation_id = session_id
+
+        # Validate conversation_id
+        if not conversation_id or conversation_id == "null" or conversation_id.strip() == "":
+            logger.warning(f"Invalid conversation_id: {conversation_id}")
+            await websocket.close(code=1008, reason="Invalid conversation ID")
+            return
+
+        # Session key for two-tier memory
+        session_key = f"web:{user_id}:{conversation_id}"
+
+        # Single active session: Close old connection for this user (but different conversation)
+        for old_session_id, conn_info in list(self._connections.items()):
+            # Check if same user (not same conversation)
+            if conn_info.get("user_id") == user_id and conn_info.get("conversation_id") != conversation_id:
+                logger.info(f"Closing old connection for user {user_id}: {old_session_id}")
+                # Close old WebSocket connection
+                await manager.disconnect(old_session_id)
+                await self._close_connection(old_session_id)
 
         # Get or create conversation
-        conversation_id = session_id
         conv_repo = ConversationRepository()
 
-        # Check if conversation exists, if not create it with the session_id
+        # Check if conversation exists, if not create it
         conv_exists = await conv_repo.exists(conversation_id)
         if not conv_exists:
             try:
@@ -237,8 +335,9 @@ class WebChannel(BaseChannel):
                     user_id=user_id,
                     title="新对话",
                     channel="web",
-                    conv_id=conversation_id  # Use the session_id as conversation_id
+                    conv_id=conversation_id
                 )
+                logger.debug(f"Created conversation {conversation_id} for user {user_id}")
             except Exception as e:
                 # Handle duplicate key error - conversation might have been created by another connection
                 error_code = getattr(e, 'args', [None])[0] if e.args else None
@@ -253,20 +352,28 @@ class WebChannel(BaseChannel):
         # Store connection info
         self._connections[session_id] = {
             "sender_id": user_id,
-            "conversation_id": conversation_id
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "session_key": session_key
         }
 
-        logger.info(f"WebSocket connection established: session={session_id}, user={user_id}")
+        logger.info(f"WebSocket connection established: session_key={session_key}, user={user_id}, conv={conversation_id}")
 
         # Send connection confirmation
-        await send_to_websocket(
-            session_id=session_id,
-            message_type="connected",
-            data={
-                "session_id": session_id,
-                "conversation_id": conversation_id
-            }
-        )
+        try:
+            await send_to_websocket(
+                session_id=session_id,
+                message_type="connected",
+                data={
+                    "session_id": session_id,
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "session_key": session_key
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error sending connected message: {e}")
+            # Don't return - continue to message loop even if connected message fails
 
         try:
             # Message loop
@@ -307,8 +414,8 @@ class WebChannel(BaseChannel):
                     async def on_thinking_end():
                         await self.send_thinking_end(session_id)
 
-                    async def on_progress(content: str):
-                        await self.send_progress(session_id, content)
+                    async def on_progress(content: str, tool_hint: bool = False):
+                        await self.send_progress(session_id, content, tool_hint=tool_hint)
 
                     # Forward to message bus for agent processing
                     # Pass WebSocket-specific callbacks for real-time progress
@@ -316,8 +423,10 @@ class WebChannel(BaseChannel):
                         sender_id=user_id,
                         chat_id=conversation_id,
                         content=content,
+                        session_key=session_key,  # Use the new session_key format: web:{user_id}:{session_id}
                         metadata={
-                            "session_id": session_id,
+                            "user_id": user_id,  # CRITICAL: for UserMemory
+                            "session_id": conversation_id,  # CRITICAL: for SessionMemory
                             "channel": "web",
                             "on_thinking_start": on_thinking_start,
                             "on_thinking_end": on_thinking_end,
@@ -365,9 +474,17 @@ class WebChannel(BaseChannel):
 
     async def _close_connection(self, session_id: str) -> None:
         """Close a WebSocket connection and clean up."""
+        from nanobot.web.app import manager
+
+        # Clean up local metadata
         if session_id in self._connections:
             del self._connections[session_id]
-            logger.info(f"WebSocket connection closed: {session_id}")
+
+        # Also disconnect from manager if it's still there
+        if session_id in manager.active_connections:
+            await manager.disconnect(session_id)
+
+        logger.info(f"WebSocket connection closed: {session_id}")
 
     async def _dispatch_outbound(self) -> None:
         """Dispatch outbound messages from the bus to WebSocket clients."""

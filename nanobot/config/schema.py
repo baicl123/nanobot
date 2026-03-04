@@ -216,6 +216,22 @@ class ChannelsConfig(Base):
     web: WebConfig = Field(default_factory=WebConfig)
 
 
+class UserMemoryConfig(Base):
+    """User-level memory configuration (cross-session long-term memory)."""
+
+    enabled: bool = False  # Disabled by default, requires explicit enable
+    consolidate_threshold: int = 30  # Messages threshold to trigger user memory consolidation
+    retention_days: int = 365  # Memory retention in days
+
+
+class SessionMemoryConfig(Base):
+    """Session-level memory configuration (single-session short-term memory)."""
+
+    enabled: bool = True  # Enabled by default
+    consolidate_threshold: int = 15  # Messages threshold to trigger session summary
+    max_sessions_per_user: int = 50  # Maximum sessions to keep per user
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -225,7 +241,11 @@ class AgentDefaults(Base):
     max_tokens: int = 8192
     temperature: float = 0.1
     max_tool_iterations: int = 40
-    memory_window: int = 100
+    memory_window: int = 100  # Backward compatible: original memory window setting
+
+    # Two-tier memory configuration
+    user_memory: UserMemoryConfig = Field(default_factory=UserMemoryConfig)
+    session_memory: SessionMemoryConfig = Field(default_factory=SessionMemoryConfig)
 
 
 class AgentsConfig(Base):

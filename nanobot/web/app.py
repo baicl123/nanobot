@@ -33,20 +33,37 @@ class ConnectionManager:
         self.active_connections[session_id] = websocket
         logger.info(f"WebSocket connected: {session_id}")
 
-    def disconnect(self, session_id: str):
+    async def disconnect(self, session_id: str):
         """Disconnect a WebSocket client."""
         if session_id in self.active_connections:
-            del self.active_connections[session_id]
+            websocket = self.active_connections.pop(session_id)
+            # Actually close the WebSocket connection
+            try:
+                await websocket.close()
+            except Exception as e:
+                logger.debug(f"Error closing WebSocket {session_id}: {e}")
             logger.info(f"WebSocket disconnected: {session_id}")
 
     async def send_json(self, session_id: str, data: dict):
         """Send JSON data to a specific client."""
-        if session_id in self.active_connections:
-            try:
-                await self.active_connections[session_id].send_json(data)
-            except Exception as e:
-                logger.error(f"Error sending to {session_id}: {e}")
-                self.disconnect(session_id)
+        if session_id not in self.active_connections:
+            logger.warning(f"Session {session_id} not in active_connections")
+            return False
+
+        try:
+            websocket = self.active_connections[session_id]
+            # Check if WebSocket is still connected
+            if websocket.client_state.name != "CONNECTED":
+                logger.warning(f"WebSocket {session_id} is not connected (state: {websocket.client_state.name})")
+                await self.disconnect(session_id)
+                return False
+
+            await websocket.send_json(data)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending to {session_id}: {e}")
+            await self.disconnect(session_id)
+            return False
 
     async def broadcast(self, data: dict, exclude: Optional[str] = None):
         """Broadcast data to all connected clients."""
@@ -61,7 +78,7 @@ class ConnectionManager:
 
         # Clean up disconnected clients
         for session_id in disconnected:
-            self.disconnect(session_id)
+            await self.disconnect(session_id)
 
 
 manager = ConnectionManager()
@@ -160,16 +177,28 @@ def create_app(cors_origins: list[str] = None) -> FastAPI:
         - token: Optional auth token (if configured)
         - user_id: User identifier (defaults to "anonymous")
         """
-        # Delegate to WebChannel if available
-        if manager.web_channel:
-            try:
+        # Accept the connection first (FastAPI requirement)
+        await websocket.accept()
+        logger.info(f"WebSocket connected: {session_id}")
+
+        # Store the connection in manager
+        manager.active_connections[session_id] = websocket
+
+        try:
+            # Delegate to WebChannel if available
+            if manager.web_channel:
+                # Don't call manager.connect() again - connection already accepted
                 await manager.web_channel.handle_websocket(websocket, session_id, user_id or "anonymous")
-            except Exception as e:
-                logger.error(f"WebChannel handler error: {e}")
-                await websocket.close(code=1011, reason="Internal server error")
-        else:
-            # Fallback to basic handler if WebChannel not set
-            await _basic_websocket_handler(websocket, session_id)
+            else:
+                # Fallback to basic handler if WebChannel not set
+                await _basic_websocket_handler(websocket, session_id)
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket disconnected normally: {session_id}")
+        except Exception as e:
+            logger.error(f"WebSocket error for {session_id}: {e}")
+        finally:
+            # Clean up connection
+            await manager.disconnect(session_id)
 
     return app
 
@@ -198,12 +227,13 @@ async def _basic_websocket_handler(websocket: WebSocket, session_id: str):
                 })
 
     except WebSocketDisconnect:
-        manager.disconnect(session_id)
+        await manager.disconnect(session_id)
     except json.JSONDecodeError:
         logger.error(f"Invalid JSON from {session_id}")
+        await manager.disconnect(session_id)
     except Exception as e:
         logger.error(f"WebSocket error for {session_id}: {e}")
-        manager.disconnect(session_id)
+        await manager.disconnect(session_id)
 
 
 # Helper function to send messages to WebSocket clients

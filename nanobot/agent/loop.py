@@ -62,6 +62,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        enable_tiered_memory: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -103,6 +104,11 @@ class AgentLoop:
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+
+        # Two-tier memory system (optional)
+        self.enable_tiered_memory = enable_tiered_memory
+        self.tiered_memory: "TieredMemoryManager" | None = None
+
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -242,6 +248,14 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
+
+        # Initialize tiered memory if enabled
+        if self.enable_tiered_memory and self.tiered_memory is None:
+            from nanobot.agent.tiered_memory import TieredMemoryManager
+            self.tiered_memory = TieredMemoryManager(self.workspace)
+            await self.tiered_memory.initialize()
+            logger.info("Tiered memory system initialized")
+
         await self._connect_mcp()
         logger.info("Agent loop started")
 
@@ -413,6 +427,18 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
         )
 
+        # Add user memory context if tiered memory is enabled
+        if self.enable_tiered_memory and self.tiered_memory:
+            # Extract user_id from session_key format: web:{user_id}:{session_id}
+            parts = key.split(':', 2) if ':' in key else []
+            user_id = parts[1] if len(parts) > 1 else None
+
+            if user_id:
+                user_context = await self.tiered_memory.get_user_context(user_id)
+                if user_context:
+                    # Add user context to system message
+                    initial_messages[0]['content'] += f"\n\n{user_context}"
+
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
@@ -484,8 +510,77 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
+    async def _consolidate_tiered_memory(
+        self,
+        session: Session,
+        user_id: str,
+        session_id: str
+    ) -> bool:
+        """
+        Consolidate session memory to user memory (tiered memory).
+
+        Called when session reaches consolidation threshold.
+        """
+        if not self.tiered_memory:
+            return True
+
+        # Generate session summary
+        old_messages = session.messages[session.last_consolidated:]
+        if not old_messages:
+            return True
+
+        # Use LLM to summarize
+        summary_prompt = "Summarize these messages concisely:\n" + "\n".join(
+            f"{m.get('role')}: {str(m.get('content', ''))[:100]}"
+            for m in old_messages[-10:]  # Last 10 messages
+        )
+
+        try:
+            response = await self.provider.chat(
+                messages=[{"role": "user", "content": summary_prompt}],
+                model=self.model,
+                max_tokens=500,
+            )
+
+            summary = response.content.strip()
+
+            # Update session memory
+            await self.tiered_memory.update_session_summary(
+                session_id=session_id,
+                summary=summary,
+                message_count=len(old_messages)
+            )
+
+            # Consolidate to user memory
+            await self.tiered_memory.consolidate_to_user_memory(
+                user_id=user_id,
+                session_summary=summary
+            )
+
+            logger.info(f"Consolidated tiered memory: session={session_id}, user={user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Tiered memory consolidation failed: {e}")
+            return False
+
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
-        """Delegate to MemoryStore.consolidate(). Returns True on success."""
+        """
+        Consolidate old messages into memory.
+
+        Uses tiered memory if enabled, otherwise falls back to original MemoryStore.
+        """
+        # Check if tiered memory is enabled and we can extract user_id/session_id
+        if self.enable_tiered_memory and self.tiered_memory:
+            # Extract user_id and session_id from session_key format: web:{user_id}:{session_id}
+            parts = session.key.split(':', 2) if ':' in session.key else []
+            user_id = parts[1] if len(parts) > 1 else None
+            session_id = parts[2] if len(parts) > 2 else None
+
+            if user_id and session_id:
+                return await self._consolidate_tiered_memory(session, user_id, session_id)
+
+        # Fallback to original MemoryStore (for backward compatibility)
         return await MemoryStore(self.workspace).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
