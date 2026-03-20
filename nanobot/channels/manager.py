@@ -9,7 +9,8 @@ from loguru import logger
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Config
+from nanobot.config.loader import load_web_config
+from nanobot.config.schema import Config, WebConfig
 
 
 class ChannelManager:
@@ -56,11 +57,18 @@ class ChannelManager:
                 logger.warning("{} channel not available: {}", name, e)
 
         # Web channel
-        if self.config.channels.web.enabled:
+        # Try to load separate web config first
+        web_config: WebConfig = self.config.channels.web
+        separate_web_config = load_web_config()
+        if separate_web_config is not None:
+            web_config = separate_web_config
+            logger.info("Loaded web configuration from separate file")
+
+        if web_config.enabled:
             try:
                 from nanobot.channels.web import WebChannel
                 self.channels["web"] = WebChannel(
-                    self.config.channels.web,
+                    web_config,
                     self.bus,
                 )
                 logger.info("Web channel enabled")

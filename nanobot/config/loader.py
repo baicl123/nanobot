@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, WebConfig
 
 
 # Global variable to store current config path (for multi-instance support)
@@ -21,6 +21,36 @@ def get_config_path() -> Path:
     if _current_config_path:
         return _current_config_path
     return Path.home() / ".nanobot" / "config.json"
+
+
+def get_web_config_path() -> Path:
+    """Get the web configuration file path."""
+    if _current_config_path:
+        # If custom config path is set, place web.json next to it
+        return _current_config_path.parent / "web.json"
+    return Path.home() / ".nanobot" / "web.json"
+
+
+def load_web_config() -> WebConfig | None:
+    """
+    Load web configuration from separate file if it exists.
+
+    Returns:
+        Loaded WebConfig if file exists and is valid, None otherwise.
+    """
+    path = get_web_config_path()
+
+    if not path.exists():
+        return None
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return WebConfig.model_validate(data)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"Warning: Failed to load web config from {path}: {e}")
+        print("Falling back to web config in main configuration file.")
+        return None
 
 
 def load_config(config_path: Path | None = None) -> Config:
