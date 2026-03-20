@@ -250,7 +250,14 @@ def _make_provider(config: Config):
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
-    if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
+    # Local providers (ollama, vllm) don't need API keys. OAuth also doesn't use keys.
+    need_api_key = (
+        not model.startswith("bedrock/")
+        and not (p and p.api_key)
+        and not (spec and spec.is_oauth)
+        and not (spec and spec.is_local)
+    )
+    if need_api_key:
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
