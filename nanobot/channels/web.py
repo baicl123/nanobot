@@ -18,7 +18,10 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import WebConfig
-from nanobot.web.db import init_db, get_session_meta, create_session, update_session, delete_session, list_user_sessions
+from nanobot.web.db import (
+    init_db, get_session_meta, create_session, update_session,
+    delete_session, list_user_sessions, get_or_create_user
+)
 from nanobot.web.models import SessionMeta
 
 
@@ -47,6 +50,11 @@ class WebChannel(BaseChannel):
         # WebSocket connections: {user_id: set(websocket)}
         self.active_connections: Dict[str, Set[WebSocket]] = {}
 
+        # 同时在线用户跟踪
+        self._online_users: Set[str] = set()
+        # 每个用户的连接计数（一个用户可能有多个浏览器标签页）
+        self._connection_counts: Dict[str, int] = {}
+
         # Create FastAPI app
         self.app = FastAPI(title="nanobot Web Channel")
 
@@ -64,12 +72,42 @@ class WebChannel(BaseChannel):
         self._register_routes()
 
         # Mount static files if they exist
-        static_path = Path(__file__).parent.parent / "web" / "static"
+        static_path = Path(__file__).parent.parent.parent / "frontend"
         if static_path.exists():
             self.app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
 
         # Server task
         self._server_task: asyncio.Task | None = None
+
+    def _try_connect_user(self, emp_id: str) -> bool:
+        """
+        尝试将用户标记为在线。
+        返回 True 表示成功，False 表示超过最大同时在线用户数。
+        """
+        current_count = self._connection_counts.get(emp_id, 0)
+
+        # 如果用户已在线，直接增加计数
+        if current_count > 0:
+            self._connection_counts[emp_id] = current_count + 1
+            return True
+
+        # 新用户，检查是否超过最大同时在线数
+        if len(self._online_users) >= self.config.max_concurrent_users:
+            return False
+
+        self._online_users.add(emp_id)
+        self._connection_counts[emp_id] = 1
+        return True
+
+    def _disconnect_user(self, emp_id: str) -> None:
+        """标记用户断开连接。"""
+        current_count = self._connection_counts.get(emp_id, 0)
+        if current_count <= 1:
+            # 最后一个连接断开
+            self._online_users.discard(emp_id)
+            self._connection_counts.pop(emp_id, None)
+        else:
+            self._connection_counts[emp_id] = current_count - 1
 
     def _register_routes(self) -> None:
         """Register FastAPI routes."""
@@ -81,6 +119,14 @@ class WebChannel(BaseChannel):
             if not self.is_allowed(empId):
                 await websocket.close(code=403, reason="Access denied")
                 return
+
+            # 检查同时在线用户数
+            if not self._try_connect_user(empId):
+                await websocket.close(code=4029, reason="Too many concurrent users")
+                return
+
+            # 创建或更新用户记录
+            get_or_create_user(empId, deptname)
 
             await websocket.accept()
 
@@ -108,6 +154,8 @@ class WebChannel(BaseChannel):
                     self.active_connections[empId].discard(websocket)
                     if not self.active_connections[empId]:
                         del self.active_connections[empId]
+                # 更新在线用户跟踪
+                self._disconnect_user(empId)
 
         @self.app.get("/api/sessions")
         async def get_user_sessions(empId: str):
@@ -122,10 +170,14 @@ class WebChannel(BaseChannel):
             """Create a new session for a user."""
             if not self.is_allowed(empId):
                 raise HTTPException(status_code=403, detail="Access denied")
+
+            # 确保用户记录存在
+            get_or_create_user(empId)
+
             session_id = f"web:{empId}:{uuid.uuid4()}"
             session = SessionMeta(
                 session_id=session_id,
-                user_id=empId,
+                emp_id=empId,
                 name=name,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
@@ -140,7 +192,7 @@ class WebChannel(BaseChannel):
             if not self.is_allowed(empId):
                 raise HTTPException(status_code=403, detail="Access denied")
             session = get_session_meta(session_id)
-            if not session or session.user_id != empId:
+            if not session or session.emp_id != empId:
                 raise HTTPException(status_code=404, detail="Session not found")
             session.name = name
             update_session(session)
@@ -152,7 +204,7 @@ class WebChannel(BaseChannel):
             if not self.is_allowed(empId):
                 raise HTTPException(status_code=403, detail="Access denied")
             session = get_session_meta(session_id)
-            if not session or session.user_id != empId:
+            if not session or session.emp_id != empId:
                 raise HTTPException(status_code=404, detail="Session not found")
             delete_session(session_id)
             return {"success": True}
@@ -163,7 +215,7 @@ class WebChannel(BaseChannel):
             if not self.is_allowed(empId):
                 raise HTTPException(status_code=403, detail="Access denied")
             session = get_session_meta(session_id)
-            if not session or session.user_id != empId:
+            if not session or session.emp_id != empId:
                 raise HTTPException(status_code=404, detail="Session not found")
 
             # 解析session_id获取uuid
@@ -172,9 +224,9 @@ class WebChannel(BaseChannel):
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid session ID format")
 
-            # 构建消息文件路径
-            from nanobot.config.paths import get_workspace_path
-            session_file = get_workspace_path() / "sessions" / f"web_{user_id}_{session_uuid}.jsonl"
+            # 构建消息文件路径（使用用户目录）
+            from nanobot.config.paths import get_user_sessions_path
+            session_file = get_user_sessions_path(user_id) / f"web_{session_uuid}.jsonl"
 
             messages = []
             if session_file.exists():
@@ -193,7 +245,7 @@ class WebChannel(BaseChannel):
                                 if role not in ["user", "assistant"]:
                                     continue
                                 # 过滤掉空内容
-                                content = msg.get("content", "").strip()
+                                content = (msg.get("content") or "").strip()
                                 if not content:
                                     continue
                                 # 只保留需要的字段
@@ -223,7 +275,7 @@ class WebChannel(BaseChannel):
 
             # Validate session belongs to user
             session = get_session_meta(session_id)
-            if not session or session.user_id != empId:
+            if not session or session.emp_id != empId:
                 await websocket.send_text(json.dumps({
                     "type": "error",
                     "data": {"message": "Invalid session"}

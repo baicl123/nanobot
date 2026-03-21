@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 
-from nanobot.web.models import Base, SessionMetaModel, SessionMeta
+from nanobot.web.models import Base, UserModel, SessionMetaModel, User, SessionMeta
 from nanobot.config import load_config
 
 # Get database path from config
@@ -44,12 +44,61 @@ def get_db():
         db.close()
 
 
+# ========== User Operations ==========
+
+def get_or_create_user(emp_id: str, deptname: str = "") -> User:
+    """Get existing user or create new one. Updates last_active_at."""
+    db = next(get_db())
+    db_user = db.query(UserModel).filter(UserModel.emp_id == emp_id).first()
+
+    now = datetime.utcnow()
+    if db_user:
+        # Update last active time
+        db_user.last_active_at = now
+        if deptname and not db_user.deptname:
+            db_user.deptname = deptname
+    else:
+        # Create new user
+        db_user = UserModel(
+            emp_id=emp_id,
+            deptname=deptname or None,
+            created_at=now,
+            last_active_at=now,
+        )
+        db.add(db_user)
+
+    db.commit()
+    db.refresh(db_user)
+    return User.from_orm(db_user)
+
+
+def get_user(emp_id: str) -> Optional[User]:
+    """Get user by emp_id."""
+    db = next(get_db())
+    db_user = db.query(UserModel).filter(UserModel.emp_id == emp_id).first()
+    return User.from_orm(db_user) if db_user else None
+
+
+def update_user_last_active(emp_id: str) -> Optional[User]:
+    """Update user's last_active_at timestamp."""
+    db = next(get_db())
+    db_user = db.query(UserModel).filter(UserModel.emp_id == emp_id).first()
+    if db_user:
+        db_user.last_active_at = datetime.utcnow()
+        db.commit()
+        db.refresh(db_user)
+        return User.from_orm(db_user)
+    return None
+
+
+# ========== Session Operations ==========
+
 def create_session(session: SessionMeta) -> SessionMeta:
     """Create a new session metadata entry."""
     db = next(get_db())
     db_session = SessionMetaModel(
         session_id=session.session_id,
-        user_id=session.user_id,
+        emp_id=session.emp_id,
         name=session.name,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -96,11 +145,11 @@ def delete_session(session_id: str) -> bool:
     return True
 
 
-def list_user_sessions(user_id: str) -> List[SessionMeta]:
+def list_user_sessions(emp_id: str) -> List[SessionMeta]:
     """List all sessions for a user, ordered by updated_at descending."""
     db = next(get_db())
     db_sessions = db.query(SessionMetaModel)\
-        .filter(SessionMetaModel.user_id == user_id)\
+        .filter(SessionMetaModel.emp_id == emp_id)\
         .order_by(SessionMetaModel.updated_at.desc())\
         .all()
     return [SessionMeta.from_orm(s) for s in db_sessions]

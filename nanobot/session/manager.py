@@ -114,6 +114,18 @@ class SessionManager:
 
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
+        # Web Channel 会话路由到用户目录
+        if key.startswith("web:"):
+            parts = key.split(":", 2)
+            if len(parts) == 3:
+                emp_id = parts[1]
+                session_uuid = parts[2]
+                from nanobot.config.paths import get_user_sessions_path
+                user_sessions_dir = get_user_sessions_path(emp_id, self.workspace)
+                safe_key = safe_filename(f"web_{session_uuid}")
+                return user_sessions_dir / f"{safe_key}.jsonl"
+
+        # 其他 Channel 保持原有行为
         safe_key = safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
 

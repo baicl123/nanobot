@@ -41,6 +41,7 @@ Web Channel 支持两种配置方式：
 | `port` | integer | 否 | 监听端口，默认 `18791` |
 | `allowFrom` | string[] | 是 | 允许访问的用户 ID 列表，`["*"]` 允许所有 |
 | `corsOrigins` | string[] | 否 | CORS 允许的源 |
+| `maxConcurrentUsers` | integer | 否 | 最大同时在线用户数，默认 100 |
 
 如果独立配置文件存在，它会**完全覆盖**主配置 `config.json` 中的设置。如果不存在，回退到使用主配置。
 
@@ -274,6 +275,7 @@ This metadata is automatically added to the system prompt so the agent is aware 
 | 1000 | Normal closure |
 | 1001 | Server shutting down |
 | 403 | Access denied - Invalid empId |
+| 4029 | Too many concurrent users |
 
 ---
 
@@ -307,8 +309,15 @@ http://localhost:9527/?empId=testuser&deptname=IT
 
 ## 数据存储
 
-- 会话元数据存储在 SQLite 数据库: `{workspace}/sessions.db`
-- 消息历史存储在 JSONL 文件: `{workspace}/sessions/web_{user_id}_{uuid}.jsonl`
+### SQLite 数据库（web.db）
+- 位置：`{workspace}/web.db`
+- 用途：存储用户信息和会话元数据（不存储对话内容）
+- 表结构详见 [database.md](./database.md)
+
+### 消息历史文件（JSONL）
+- 位置：`{workspace}/users/{empId}/sessions/web_{uuid}.jsonl`
+- 格式：JSON Lines，每行一条消息
+- 说明：每个用户有独立的会话目录
 
 ## JavaScript 连接示例
 

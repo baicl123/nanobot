@@ -208,6 +208,7 @@ class WebConfig(Base):
     port: int = 18791
     allow_from: list[str] = Field(default_factory=list)  # Allowed employee IDs
     cors_origins: list[str] = Field(default_factory=list)  # Allowed CORS origins
+    max_concurrent_users: int = 100  # Maximum concurrent online users
 
 
 class ChannelsConfig(Base):

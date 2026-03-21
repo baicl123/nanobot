@@ -77,8 +77,14 @@ class MemoryStore:
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
-    def __init__(self, workspace: Path):
-        self.memory_dir = ensure_dir(workspace / "memory")
+    def __init__(self, workspace: Path, emp_id: str | None = None):
+        if emp_id:
+            # Web Channel 用户级别 memory 目录
+            from nanobot.config.paths import get_user_memory_path
+            self.memory_dir = get_user_memory_path(emp_id, workspace)
+        else:
+            # 全局 memory 目录（其他 channel 使用）
+            self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self._consecutive_failures = 0
@@ -234,7 +240,8 @@ class MemoryConsolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
     ):
-        self.store = MemoryStore(workspace)
+        self.workspace = workspace
+        self.global_store = MemoryStore(workspace)
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -247,9 +254,22 @@ class MemoryConsolidator:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+    def _get_store_for_session(self, session_key: str) -> MemoryStore:
+        """Get the appropriate MemoryStore for a session key."""
+        # Web Channel 会话：使用用户级别 memory
+        if session_key.startswith("web:"):
+            try:
+                _, emp_id, _ = session_key.split(":", 2)
+                return MemoryStore(self.workspace, emp_id=emp_id)
+            except ValueError:
+                pass
+        # 其他：使用全局 memory
+        return self.global_store
+
+    async def consolidate_messages(self, messages: list[dict[str, object]], session_key: str | None = None) -> bool:
         """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+        store = self._get_store_for_session(session_key) if session_key else self.global_store
+        return await store.consolidate(messages, self.provider, self.model)
 
     def pick_consolidation_boundary(
         self,
@@ -294,7 +314,7 @@ class MemoryConsolidator:
         """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
         if not messages:
             return True
-        for _ in range(self.store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
+        for _ in range(self.global_store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
             if await self.consolidate_messages(messages):
                 return True
         return True
@@ -347,7 +367,7 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.consolidate_messages(chunk):
+                if not await self.consolidate_messages(chunk, session_key=session.key):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)

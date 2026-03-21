@@ -421,13 +421,30 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        # 从 metadata 提取用户信息（仅 Web Channel）
+        metadata = msg.metadata or {}
+        emp_id = metadata.get("emp_id")
+        deptname = metadata.get("deptname")
+
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
+
+        # 如果有用户信息，使用带用户信息的 ContextBuilder
+        if emp_id:
+            user_context = ContextBuilder(self.workspace, emp_id=emp_id, deptname=deptname)
+            initial_messages = user_context.build_messages(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel, chat_id=msg.chat_id,
+            )
+        else:
+            # 没有用户信息，使用全局 ContextBuilder
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel, chat_id=msg.chat_id,
+            )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})

@@ -19,14 +19,24 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, emp_id: str | None = None, deptname: str | None = None):
         self.workspace = workspace
-        self.memory = MemoryStore(workspace)
+        self.emp_id = emp_id
+        self.deptname = deptname
+        self.memory = MemoryStore(workspace, emp_id=emp_id)
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        # 添加用户身份信息（仅 Web Channel）
+        if self.emp_id:
+            user_identity_parts = ["## User Identity"]
+            user_identity_parts.append(f"Employee ID: {self.emp_id}")
+            if self.deptname:
+                user_identity_parts.append(f"Department: {self.deptname}")
+            parts.append("\n".join(user_identity_parts))
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -72,6 +82,14 @@ Skills with available="false" need dependencies installed first - you can try in
 - Use file tools when they are simpler or more reliable than shell commands.
 """
 
+        # 动态确定 memory 路径
+        if self.emp_id:
+            from nanobot.config.paths import get_user_memory_path
+            memory_dir = get_user_memory_path(self.emp_id, self.workspace)
+            memory_path = str(memory_dir.expanduser().resolve())
+        else:
+            memory_path = f"{workspace_path}/memory"
+
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant.
@@ -81,8 +99,8 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Long-term memory: {memory_path}/MEMORY.md (write important facts here)
+- History log: {memory_path}/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
 {platform_policy}

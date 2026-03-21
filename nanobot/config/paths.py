@@ -53,3 +53,19 @@ def get_bridge_install_dir() -> Path:
 def get_legacy_sessions_dir() -> Path:
     """Return the legacy global session directory used for migration fallback."""
     return Path.home() / ".nanobot" / "sessions"
+
+
+def get_user_workspace_path(emp_id: str, workspace: Path | None = None) -> Path:
+    """Get the user-specific workspace path."""
+    base = get_workspace_path(workspace)
+    return ensure_dir(base / "users" / emp_id)
+
+
+def get_user_sessions_path(emp_id: str, workspace: Path | None = None) -> Path:
+    """Get the user-specific sessions directory."""
+    return ensure_dir(get_user_workspace_path(emp_id, workspace) / "sessions")
+
+
+def get_user_memory_path(emp_id: str, workspace: Path | None = None) -> Path:
+    """Get the user-specific memory directory."""
+    return ensure_dir(get_user_workspace_path(emp_id, workspace) / "memory")

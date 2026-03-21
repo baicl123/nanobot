@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nanobot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .prose {
+            max-width: none;
+        }
+        .prose pre {
+            background-color: #f3f4f6;
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            overflow-x: auto;
+        }
+        .prose code {
+            background-color: #f3f4f6;
+            padding: 0.125rem 0.25rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+        }
+        .prose pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .prose ul, .prose ol {
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .prose li {
+            margin-top: 0.25rem;
+            margin-bottom: 0.25rem;
+        }
+        .prose p {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .prose h1, .prose h2, .prose h3 {
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        .prose h1 { font-size: 1.5rem; }
+        .prose h2 { font-size: 1.25rem; }
+        .prose h3 { font-size: 1.125rem; }
+        .prose blockquote {
+            border-left: 4px solid #3b82f6;
+            padding-left: 1rem;
+            color: #6b7280;
+            margin: 0.5rem 0;
+        }
+        .prose a {
+            color: #3b82f6;
+            text-decoration: underline;
+        }
+        .prose table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.5rem 0;
+        }
+        .prose th, .prose td {
+            border: 1px solid #e5e7eb;
+            padding: 0.5rem;
+        }
+        .prose th {
+            background-color: #f9fafb;
+        }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+    <!-- 侧边栏 -->
+    <div class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <div class="p-4 border-b">
+            <h1 class="text-xl font-bold">🤖 nanobot</h1>
+            <button id="new-chat" class="w-full mt-3 bg-gray-100 hover:bg-gray-200 rounded px-3 py-2 text-sm flex items-center justify-center gap-2">
+                <i class="fas fa-plus"></i> 新建对话
+            </button>
+        </div>
+        <div id="session-list" class="flex-1 overflow-y-auto p-2">
+            <div class="text-center text-gray-500 text-sm mt-4">加载中...</div>
+        </div>
+        <div class="p-3 border-t text-xs text-gray-500">
+            <div>用户: <span id="user-id"></span></div>
+            <div>部门: <span id="dept-name"></span></div>
+        </div>
+    </div>
+
+    <!-- 主区域 -->
+    <div class="flex-1 flex flex-col bg-gray-50">
+        <div class="p-4 bg-white border-b flex justify-between items-center">
+            <h2 id="session-title" class="text-lg font-semibold"></h2>
+            <div class="flex gap-2">
+                <button id="clear-chat" class="text-gray-500 hover:text-red-500 p-2" title="清空对话" disabled>
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 消息区域 -->
+        <div id="message-container" class="flex-1 overflow-y-auto p-6">
+            <div id="empty-state" class="h-full flex flex-col items-center justify-center">
+                <div class="text-4xl mb-4">🤖</div>
+                <h2 class="text-2xl font-semibold mb-2">有什么我能帮你的吗？</h2>
+                <p class="text-gray-500">输入问题，我会为你提供专业的解答</p>
+            </div>
+            <div id="message-list" class="max-w-5xl mx-auto hidden"></div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="p-4 bg-white border-t">
+            <div class="max-w-5xl mx-auto relative">
+                <textarea
+                    id="message-input"
+                    class="w-full border rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    placeholder="输入消息... (按Enter发送，Shift+Enter换行)"
+                    rows="3"
+                ></textarea>
+                <button
+                    id="send-btn"
+                    class="absolute right-3 bottom-3 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded"
+                >
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            <div class="max-w-5xl mx-auto mt-2 text-xs text-gray-500 flex justify-between">
+                <span id="status">
+                    <i class="fas fa-circle text-green-500"></i> 已连接
+                </span>
+                <span>支持Markdown语法</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 获取参数
+        const params = new URLSearchParams(window.location.search);
+        const empId = params.get('empId');
+        const deptname = params.get('deptname') || '未知部门';
+
+        if (!empId) {
+            alert('缺少empId参数');
+            throw new Error('Missing empId');
+        }
+
+        // 初始化显示
+        document.getElementById('user-id').textContent = empId;
+        document.getElementById('dept-name').textContent = deptname;
+
+        // 全局状态
+        let currentSession = null;
+        let ws = null;
+        let sessions = [];
+
+        // DOM元素
+        const sessionListEl = document.getElementById('session-list');
+        const messageListEl = document.getElementById('message-list');
+        const emptyStateEl = document.getElementById('empty-state');
+        const messageInputEl = document.getElementById('message-input');
+        const sendBtnEl = document.getElementById('send-btn');
+        const newChatBtnEl = document.getElementById('new-chat');
+        const sessionTitleEl = document.getElementById('session-title');
+        const clearChatBtnEl = document.getElementById('clear-chat');
+        const statusEl = document.getElementById('status');
+
+        // 删除会话
+        async function deleteSession(sessionId, event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            if (!confirm('确定删除？')) return;
+
+            try {
+                await fetch(`/api/sessions/${sessionId}?empId=${empId}`, { method: 'DELETE' });
+                await loadSessions();
+                if (currentSession && currentSession.session_id === sessionId) {
+                    currentSession = null;
+                    sessionTitleEl.textContent = '';
+                    clearMessages();
+                    clearChatBtnEl.disabled = true;
+                    emptyStateEl.classList.remove('hidden');
+                    messageListEl.classList.add('hidden');
+                }
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // 加载会话列表
+        async function loadSessions() {
+            try {
+                const res = await fetch(`/api/sessions?empId=${empId}`);
+                const data = await res.json();
+                sessions = data.sessions || [];
+                renderSessions();
+            } catch (e) {
+                console.error('加载会话失败:', e);
+                sessionListEl.innerHTML = `<div class="text-center text-red-500 text-sm mt-4">加载失败: ${e.message}</div>`;
+            }
+        }
+
+        // 渲染会话列表
+        function renderSessions() {
+            if (sessions.length === 0) {
+                sessionListEl.innerHTML = '<div class="text-center text-gray-500 text-sm mt-4">暂无会话</div>';
+                return;
+            }
+
+            // 按时间倒序
+            sessions.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+            sessionListEl.innerHTML = sessions.map(s => `
+                <div class="session-item px-2 py-0.5 rounded mb-1 hover:bg-gray-100 cursor-pointer group flex items-center justify-between ${s.session_id === currentSession?.session_id ? 'bg-blue-50 text-blue-600' : ''}" data-id="${s.session_id}">
+                    <div class="truncate text-sm flex-1 min-w-0">${escapeHtml(s.name)}</div>
+                    <button class="delete-btn opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1 transition-opacity" data-id="${s.session_id}" title="删除会话">
+                        <i class="fas fa-trash-alt text-xs"></i>
+                    </button>
+                </div>
+            `).join('');
+
+            // 绑定点击事件
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    if (!e.target.closest('.delete-btn')) {
+                        selectSession(el.dataset.id);
+                    }
+                });
+            });
+
+            // 绑定删除按钮事件
+            document.querySelectorAll('.delete-btn').forEach(el => {
+                el.addEventListener('click', (e) => deleteSession(el.dataset.id, e));
+            });
+        }
+
+        // 选择会话
+        async function selectSession(sessionId) {
+            currentSession = sessions.find(s => s.session_id === sessionId);
+            if (!currentSession) return;
+
+            sessionTitleEl.textContent = currentSession.name;
+            renderSessions();
+            clearMessages();
+
+            // 显示消息区域
+            emptyStateEl.classList.add('hidden');
+            messageListEl.classList.remove('hidden');
+
+            // 启用按钮
+            clearChatBtnEl.disabled = false;
+
+            // 加载历史消息
+            try {
+                const res = await fetch(`/api/sessions/${sessionId}/messages?empId=${empId}`);
+                const data = await res.json();
+                const messages = data.messages || [];
+                messages.forEach(msg => addMessage(msg.role, msg.content));
+            } catch (e) {
+                console.error('加载历史消息失败:', e);
+            }
+        }
+
+        // 新建会话
+        newChatBtnEl.addEventListener('click', async () => {
+            try {
+                const res = await fetch(`/api/sessions?empId=${empId}&name=新对话`, { method: 'POST' });
+                const data = await res.json();
+                await loadSessions();
+                selectSession(data.session.session_id);
+            } catch (e) {
+                alert('新建会话失败: ' + e.message);
+            }
+        });
+
+        // 清空聊天
+        clearChatBtnEl.addEventListener('click', () => {
+            if (confirm('确定清空？')) {
+                clearMessages();
+            }
+        });
+
+        // 发送消息
+        async function sendMessage() {
+            const content = messageInputEl.value.trim();
+            if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            // 如果没有选中会话，先新建
+            if (!currentSession) {
+                try {
+                    const res = await fetch(`/api/sessions?empId=${empId}&name=新对话`, { method: 'POST' });
+                    const data = await res.json();
+                    await loadSessions();
+                    currentSession = data.session;
+                    sessionTitleEl.textContent = currentSession.name;
+                    renderSessions();
+
+                    // 显示消息区域
+                    emptyStateEl.classList.add('hidden');
+                    messageListEl.classList.remove('hidden');
+
+                    // 启用按钮
+                    clearChatBtnEl.disabled = false;
+                } catch (e) {
+                    alert('新建会话失败: ' + e.message);
+                    return;
+                }
+            }
+
+            // 如果是"新对话"，用第一句消息重命名
+            if (currentSession.name === '新对话' || currentSession.name === 'New Chat') {
+                const newName = content.length > 15 ? content.substring(0, 15) + '...' : content;
+                await fetch(`/api/sessions/${currentSession.session_id}?empId=${empId}&name=${encodeURIComponent(newName)}`, { method: 'PUT' });
+                currentSession.name = newName;
+                sessionTitleEl.textContent = newName;
+                renderSessions();
+            }
+
+            // 添加用户消息
+            addMessage('user', content);
+            messageInputEl.value = '';
+
+            // 显示打字动画
+            addTyping();
+
+            // 发送消息
+            ws.send(JSON.stringify({
+                type: 'message',
+                data: { content, session_id: currentSession.session_id }
+            }));
+        }
+
+        // 添加消息
+        function addMessage(role, content) {
+            const isUser = role === 'user';
+            const el = document.createElement('div');
+            el.className = 'flex items-start gap-3 mb-6';
+
+            let messageContent;
+            if (isUser) {
+                messageContent = `<div class="whitespace-pre-wrap">${escapeHtml(content)}</div>`;
+            } else {
+                messageContent = `<div class="prose">${marked.parse(content)}</div>`;
+            }
+
+            el.innerHTML = `
+                <div class="w-8 h-8 rounded-full ${isUser ? 'bg-green-600' : 'bg-blue-600'} flex items-center justify-center text-white shrink-0">
+                    <i class="fas ${isUser ? 'fa-user' : 'fa-robot'}"></i>
+                </div>
+                <div class="${isUser ? 'bg-blue-50' : 'bg-white'} rounded-lg ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'} shadow-sm p-4 max-w-[90%]">
+                    ${messageContent}
+                </div>
+            `;
+            messageListEl.appendChild(el);
+            scrollToBottom();
+        }
+
+        // 添加打字动画
+        function addTyping() {
+            const el = document.createElement('div');
+            el.className = 'typing flex items-start gap-3 mb-6';
+            el.innerHTML = `
+                <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white shrink-0">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div class="bg-white rounded-lg rounded-tl-none shadow-sm p-4">
+                    <div class="typing-animation">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin:0 2px;animation:typing 1.4s infinite ease-in-out both;animation-delay:-0.32s"></span>
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin:0 2px;animation:typing 1.4s infinite ease-in-out both;animation-delay:-0.16s"></span>
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin:0 2px;animation:typing 1.4s infinite ease-in-out both"></span>
+                    </div>
+                </div>
+            `;
+            messageListEl.appendChild(el);
+            scrollToBottom();
+        }
+
+        // 移除打字动画
+        function removeTyping() {
+            const el = document.querySelector('.typing');
+            if (el) el.remove();
+        }
+
+        // 清空消息
+        function clearMessages() {
+            messageListEl.innerHTML = '';
+        }
+
+        // 滚动到底部
+        function scrollToBottom() {
+            const container = document.getElementById('message-container');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 转义HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 连接WebSocket
+        function connectWs() {
+            statusEl.innerHTML = '<i class="fas fa-circle text-yellow-500"></i> 连接中...';
+            ws = new WebSocket(`ws://${window.location.host}/ws?empId=${empId}&deptname=${encodeURIComponent(deptname)}`);
+
+            ws.onopen = () => {
+                statusEl.innerHTML = '<i class="fas fa-circle text-green-500"></i> 已连接';
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'message') {
+                    const { content, is_progress, session_id } = msg.data;
+
+                    // 只处理当前会话的消息
+                    if (!currentSession || session_id !== currentSession.session_id) {
+                        // 如果不是当前会话的消息，忽略（不显示，但也不丢失，等用户切回该会话时会从历史记录加载
+                        return;
+                    }
+
+                    if (is_progress) {
+                        // 流式响应
+                        const typing = document.querySelector('.typing');
+                        if (typing) {
+                            typing.querySelector('.typing-animation').remove();
+                            typing.querySelector('div:nth-child(2)').innerHTML = `<div class="prose">${marked.parse(content)}</div>`;
+                            scrollToBottom();
+                        }
+                    } else {
+                        // 完整消息
+                        removeTyping();
+                        addMessage('assistant', content);
+                    }
+                }
+            };
+
+            ws.onerror = () => {
+                statusEl.innerHTML = '<i class="fas fa-circle text-red-500"></i> 连接错误';
+            };
+
+            ws.onclose = () => {
+                statusEl.innerHTML = '<i class="fas fa-circle text-red-500"></i> 已断开';
+                setTimeout(connectWs, 3000);
+            };
+        }
+
+        // 绑定事件
+        sendBtnEl.addEventListener('click', sendMessage);
+        messageInputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // 初始化
+        loadSessions();
+        connectWs();
+
+        // 加载动画CSS
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes typing {
+                0%, 80%, 100% { transform: scale(0); }
+                40% { transform: scale(1); }
+            }
+            .hidden { display: none !important; }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
