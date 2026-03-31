@@ -1,0 +1,621 @@
+# Instincts generated from https://github.com/baicl123/nanobot
+# Generated: 2026-03-11T02:35:11.996Z
+# Version: 2.0
+
+---
+id: nanobot-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Commit Length
+
+## Action
+
+Write moderate-length commit messages (~50 characters)
+
+## Evidence
+
+- Average commit message length: 56 chars
+- Based on 200 commits
+
+---
+id: nanobot-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: nanobot-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: nanobot-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: nanobot-workflow-database-migration
+trigger: "when modifying the database schema or adding tables"
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Database Migration
+
+## Action
+
+Follow the database-migration workflow:
+1. Create migration file
+2. Update schema definitions
+3. Generate/update types
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~6x per month
+- Files: **/schema.*
+
+---
+id: nanobot-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: **/*.test.*
+
+---
+id: nanobot-workflow-refactoring
+trigger: "when refactoring code"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Refactoring
+
+## Action
+
+Follow the refactoring workflow:
+1. Ensure tests pass before refactor
+2. Refactor code structure
+3. Verify tests still pass
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: src/**/*
+
+---
+id: nanobot-workflow-channel-feature-enhancement
+trigger: "when doing channel feature enhancement"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Channel Feature Enhancement
+
+## Action
+
+Follow the channel-feature-enhancement workflow:
+1. Modify channel implementation file (e.g., nanobot/channels/slack.py)
+2. Update configuration schema if needed (nanobot/config/schema.py)
+3. Add corresponding tests (tests/test_*_channel.py)
+4. Create PR and merge
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~8x per month
+- Files: nanobot/channels/*.py, nanobot/config/schema.py, tests/test_*_channel.py
+
+---
+id: nanobot-workflow-cli-command-modification
+trigger: "when doing cli command modification"
+confidence: 0.75
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Cli Command Modification
+
+## Action
+
+Follow the cli-command-modification workflow:
+1. Update CLI commands implementation (nanobot/cli/commands.py)
+2. Add or update corresponding tests (tests/test_commands.py)
+3. Test configuration integration
+4. Merge changes
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~5x per month
+- Files: nanobot/cli/commands.py, tests/test_commands.py
+
+---
+id: nanobot-workflow-merge-branch-integration
+trigger: "when doing merge branch integration"
+confidence: 0.8
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Merge Branch Integration
+
+## Action
+
+Follow the merge-branch-integration workflow:
+1. Merge main branch into feature branch
+2. Resolve conflicts across multiple system files
+3. Update all affected modules and tests
+4. Final merge to main
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~6x per month
+- Files: nanobot/agent/*.py, nanobot/channels/*.py, nanobot/providers/*.py
+
+---
+id: nanobot-workflow-documentation-and-versioning
+trigger: "when doing documentation and versioning"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Documentation And Versioning
+
+## Action
+
+Follow the documentation-and-versioning workflow:
+1. Update version in nanobot/__init__.py and pyproject.toml
+2. Update README.md with release notes or changes
+3. Sometimes update SECURITY.md
+4. Commit changes
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: README.md, nanobot/__init__.py, pyproject.toml
+
+---
+id: nanobot-workflow-provider-enhancement
+trigger: "when doing provider enhancement"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/baicl123/nanobot
+---
+
+# Nanobot Workflow Provider Enhancement
+
+## Action
+
+Follow the provider-enhancement workflow:
+1. Modify provider implementation (nanobot/providers/*.py)
+2. Update provider registry if needed
+3. Add corresponding tests (tests/test_*_provider.py)
+4. Update base provider classes if applicable
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: nanobot/providers/*.py, nanobot/providers/base.py, tests/test_*_provider.py
+
+---
+id: nanobot-snake-case-files
+trigger: "When creating new Python files"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Snake Case Files
+
+## Action
+
+Use snake_case naming convention for file names
+
+## Evidence
+
+- Files like test_qq_channel.py
+- Pattern in nanobot/channels/*.py structure
+
+---
+id: nanobot-camel-case-functions
+trigger: "When defining function names"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Camel Case Functions
+
+## Action
+
+Use camelCase naming convention for functions
+
+## Evidence
+
+- Consistent camelCase pattern in codeStyle analysis
+- Mixed import style suggests JavaScript/TypeScript influence
+
+---
+id: nanobot-pascal-case-classes
+trigger: "When defining class names"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Pascal Case Classes
+
+## Action
+
+Use PascalCase naming convention for classes
+
+## Evidence
+
+- Standard PascalCase pattern identified in codeStyle analysis
+- Python convention alignment
+
+---
+id: nanobot-screaming-snake-constants
+trigger: "When defining constants"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Screaming Snake Constants
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant values
+
+## Evidence
+
+- SCREAMING_SNAKE_CASE pattern in namingConventions
+- Standard Python constant convention
+
+---
+id: nanobot-try-catch-errors
+trigger: "When handling errors in code"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Try Catch Errors
+
+## Action
+
+Use try-catch blocks for error handling
+
+## Evidence
+
+- errorHandling style: try-catch
+- No custom error classes or global handlers detected
+
+---
+id: nanobot-test-file-naming
+trigger: "When creating test files"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Test File Naming
+
+## Action
+
+Name test files as test_[module]_[type].py in tests/ directory
+
+## Evidence
+
+- Pattern in tests/test_qq_channel.py
+- Separate test location with tests/ folder
+
+---
+id: nanobot-channel-test-pattern
+trigger: "When adding tests for channel functionality"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Channel Test Pattern
+
+## Action
+
+Create test_*_channel.py files for each channel implementation
+
+## Evidence
+
+- tests/test_*_channel.py pattern in workflows
+- Channel-specific testing in channel-feature-enhancement workflow
+
+---
+id: nanobot-provider-test-pattern
+trigger: "When adding tests for provider functionality"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Provider Test Pattern
+
+## Action
+
+Create test_*_provider.py files for each provider implementation
+
+## Evidence
+
+- tests/test_*_provider.py pattern in provider-enhancement workflow
+- Consistent testing pattern across modules
+
+---
+id: nanobot-conventional-commits
+trigger: "When making commits"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Conventional Commits
+
+## Action
+
+Use conventional commit format with prefixes: fix, feat, docs, chore, refactor, merge
+
+## Evidence
+
+- Commit examples show fix, feat, docs prefixes
+- Average commit length 56 chars suggests structured format
+
+---
+id: nanobot-commit-scope
+trigger: "When committing changes to specific modules"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Commit Scope
+
+## Action
+
+Include module scope in parentheses like feat(telegram): or fix(auth):
+
+## Evidence
+
+- feat(telegram): add configurable group mention policy
+- fix(skill-creator): restore validation
+
+---
+id: nanobot-channel-workflow
+trigger: "When adding features or fixing bugs in messaging platform integrations"
+confidence: 0.92
+domain: workflow
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Channel Workflow
+
+## Action
+
+Modify channel file, update config schema, add tests, create PR
+
+## Evidence
+
+- channel-feature-enhancement workflow frequency ~8x/month
+- Files: nanobot/channels/*.py, nanobot/config/schema.py, tests/test_*_channel.py
+
+---
+id: nanobot-cli-workflow
+trigger: "When modifying command line interface functionality"
+confidence: 0.89
+domain: workflow
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Cli Workflow
+
+## Action
+
+Update nanobot/cli/commands.py and add corresponding tests in tests/test_commands.py
+
+## Evidence
+
+- cli-command-modification workflow frequency ~5x/month
+- Specific files: nanobot/cli/commands.py, tests/test_commands.py
+
+---
+id: nanobot-merge-workflow
+trigger: "When integrating feature branches or pull requests"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Merge Workflow
+
+## Action
+
+Merge main into feature branch, resolve conflicts, update all affected modules and tests
+
+## Evidence
+
+- merge-branch-integration workflow frequency ~6x/month
+- Multiple system files involved across agent, channels, providers, config
+
+---
+id: nanobot-release-workflow
+trigger: "When preparing releases or updating project documentation"
+confidence: 0.87
+domain: workflow
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Release Workflow
+
+## Action
+
+Update version in __init__.py and pyproject.toml, update README.md, optionally update SECURITY.md
+
+## Evidence
+
+- documentation-and-versioning workflow frequency ~4x/month
+- Files: README.md, nanobot/__init__.py, pyproject.toml, SECURITY.md
+
+---
+id: nanobot-provider-workflow
+trigger: "When updating AI provider implementations or adding new provider support"
+confidence: 0.83
+domain: workflow
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Provider Workflow
+
+## Action
+
+Modify provider implementation, update provider registry, add tests, update base classes if needed
+
+## Evidence
+
+- provider-enhancement workflow frequency ~3x/month
+- Files: nanobot/providers/*.py, nanobot/providers/base.py, tests/test_*_provider.py
+
+---
+id: nanobot-hybrid-architecture
+trigger: "When organizing modules in the codebase"
+confidence: 0.85
+domain: architecture
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Hybrid Architecture
+
+## Action
+
+Use hybrid module organization with main package nanobot/ and separate tests/ directory
+
+## Evidence
+
+- moduleOrganization: hybrid
+- Common folders: nanobot, tests, bridge, case
+
+---
+id: nanobot-docker-config
+trigger: "When setting up deployment configuration"
+confidence: 0.8
+domain: architecture
+source: repo-analysis
+source_repo: baicl123/nanobot
+---
+
+# Nanobot Docker Config
+
+## Action
+
+Use Dockerfile and docker-compose.yml for containerization with bridge/ for TypeScript components
+
+## Evidence
+
+- Config files: Dockerfile, docker-compose.yml, bridge/package.json, bridge/tsconfig.json
+- Mixed Python/TypeScript architecture
+
